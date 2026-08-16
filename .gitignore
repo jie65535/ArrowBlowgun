@@ -1,0 +1,27 @@
+# Local configuration
+Config.Build.user.props
+
+# Build output
+artifacts/
+**/bin/
+**/obj/
+*.binlog
+*.nupkg
+*.snupkg
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.rsuser
+*.suo
+*.user
+*.DotSettings.user
+
+# Logs and crash dumps
+*.log
+mono_crash.*
+
+# OS metadata
+.DS_Store
+Thumbs.db

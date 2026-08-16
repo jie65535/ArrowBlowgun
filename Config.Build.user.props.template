@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- Set these when PEAK or BepInEx is installed outside the default Steam path. -->
+    <!-- <PEAKGameRootDir>C:\Path\To\PEAK\</PEAKGameRootDir> -->
+    <!-- <PEAKBepInExDir>C:\Path\To\PEAK\BepInEx\</PEAKBepInExDir> -->
+
+    <DeployModFiles>true</DeployModFiles>
+  </PropertyGroup>
+</Project>
