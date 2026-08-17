@@ -7,7 +7,7 @@ namespace ArrowBlowgun;
 internal sealed class Action_FireArrow : ItemAction
 {
     private const float ArrowShooterRange = 80f;
-    private const float MaxAimCorrectionDegrees = 35f;
+    private const float DefaultAimCorrectionDegrees = 35f;
     private const float Knockback = 30f;
     private const float KnockbackRadius = 400f;
 
@@ -17,12 +17,16 @@ internal sealed class Action_FireArrow : ItemAction
     [SerializeField]
     private Transform spawnTransform = null!;
 
+    [SerializeField]
+    private float maxAimCorrectionDegrees = DefaultAimCorrectionDegrees;
+
     internal Transform SpawnTransform => spawnTransform;
 
-    internal void CopyFrom(Action_RaycastDart source)
+    internal void CopyFrom(Action_RaycastDart source, float aimCorrectionDegrees)
     {
         maxDistance = source.maxDistance > 0f ? source.maxDistance : ArrowShooterRange;
         spawnTransform = source.spawnTransform;
+        maxAimCorrectionDegrees = Mathf.Clamp(aimCorrectionDegrees, 0f, 90f);
         ArrowTrapFeedback.ConfigureFallback(
             source.shotSFX,
             source.GetComponentsInChildren<ParticleSystem>(includeInactive: true)
@@ -80,7 +84,7 @@ internal sealed class Action_FireArrow : ItemAction
                 .RotateTowards(
                     barrelDirection,
                     desiredDirection,
-                    MaxAimCorrectionDegrees * Mathf.Deg2Rad,
+                    maxAimCorrectionDegrees * Mathf.Deg2Rad,
                     0f
                 )
                 .normalized;

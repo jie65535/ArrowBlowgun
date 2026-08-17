@@ -21,20 +21,33 @@ public sealed class Plugin : BaseUnityPlugin
 {
     internal const string PluginGuid = "com.github.jie65535.ArrowBlowgun";
     internal const string PluginName = "ArrowBlowgun";
-    internal const string PluginVersion = "0.1.0";
+    internal const string PluginVersion = "0.1.1";
 
     private const string PrefabName = "ArrowBlowgun";
     private const string ItemNameKey = "ARROW_BLOWGUN";
     private const string ItemPrefabFolder = "0_Items/";
     private const int DefaultUses = 3;
     private const int MinimumUses = 1;
+    private const float DefaultShotUseTime = 1f;
+    private const float MinimumShotUseTime = 0f;
+    private const float MaximumShotUseTime = 10f;
+    private const float DefaultAimCorrectionDegrees = 35f;
+    private const float MinimumAimCorrectionDegrees = 0f;
+    private const float MaximumAimCorrectionDegrees = 90f;
+    private const bool DefaultAddToLootPool = true;
 
     internal static ManualLogSource Log { get; private set; } = null!;
     internal static Item? RegisteredItem { get; private set; }
     internal int ConfiguredUses => usesConfig.Value;
+    internal bool ConfiguredAddToLootPool => addToLootPoolConfig.Value;
 
     private ConfigEntry<int> usesConfig = null!;
+    private ConfigEntry<float> shotUseTimeConfig = null!;
+    private ConfigEntry<float> aimCorrectionDegreesConfig = null!;
+    private ConfigEntry<bool> addToLootPoolConfig = null!;
     private int effectiveUses = DefaultUses;
+    private bool effectiveAddToLootPool = DefaultAddToLootPool;
+    private SpawnPool originalLootSpawnLocations = SpawnPool.None;
     private GameObject prefabContainer = null!;
 
     private void Awake()
@@ -47,6 +60,29 @@ public sealed class Plugin : BaseUnityPlugin
             "Number of shots before the Arrow Blowgun is consumed. Minimum: 1. "
                 + "In multiplayer, the room creator's value is used for everyone."
         );
+        shotUseTimeConfig = Config.Bind(
+            "Balance",
+            "ShotUseTime",
+            DefaultShotUseTime,
+            "Seconds the primary action must be held before firing. Set to 0 for an "
+                + "instant semi-automatic shot. This is a per-player setting and is not "
+                + $"synchronized. Range: {MinimumShotUseTime}-{MaximumShotUseTime}."
+        );
+        aimCorrectionDegreesConfig = Config.Bind(
+            "Balance",
+            "AimCorrectionDegrees",
+            DefaultAimCorrectionDegrees,
+            "Maximum angle in degrees that a shot may turn from the muzzle toward the "
+                + "center-screen aim point. Set to 0 to disable correction. This is a "
+                + $"per-player setting and is not synchronized. Range: {MinimumAimCorrectionDegrees}-{MaximumAimCorrectionDegrees}."
+        );
+        addToLootPoolConfig = Config.Bind(
+            "Spawning",
+            "AddToLootPool",
+            DefaultAddToLootPool,
+            "Whether the Arrow Blowgun is included in the vanilla blowgun's random loot "
+                + "pools. In multiplayer, the room creator's value is used for everyone."
+        );
 
         if (usesConfig.Value < MinimumUses)
         {
@@ -56,8 +92,22 @@ public sealed class Plugin : BaseUnityPlugin
             usesConfig.Value = MinimumUses;
         }
 
+        ValidateFloatConfig(
+            shotUseTimeConfig,
+            DefaultShotUseTime,
+            MinimumShotUseTime,
+            MaximumShotUseTime
+        );
+        ValidateFloatConfig(
+            aimCorrectionDegreesConfig,
+            DefaultAimCorrectionDegrees,
+            MinimumAimCorrectionDegrees,
+            MaximumAimCorrectionDegrees
+        );
+
         effectiveUses = usesConfig.Value;
-        gameObject.AddComponent<RoomUsesSynchronizer>().Initialize(this);
+        effectiveAddToLootPool = addToLootPoolConfig.Value;
+        gameObject.AddComponent<RoomConfigSynchronizer>().Initialize(this);
 
         prefabContainer = new GameObject($"{PluginGuid}.Prefabs");
         prefabContainer.SetActive(false);
@@ -127,12 +177,25 @@ public sealed class Plugin : BaseUnityPlugin
         vanillaAction.enabled = false;
 
         Action_FireArrow arrowAction = prefab.AddComponent<Action_FireArrow>();
-        arrowAction.CopyFrom(vanillaAction);
+        arrowAction.CopyFrom(vanillaAction, aimCorrectionDegreesConfig.Value);
 
         item.UIData.itemName = ItemNameKey;
         item.UIData.isShootable = true;
         item.UIData.hideFuel = effectiveUses <= MinimumUses;
+        item.usingTimePrimary = shotUseTimeConfig.Value;
         item.totalUses = effectiveUses;
+
+        LootData? lootData = item.GetComponent<LootData>();
+        if (lootData != null)
+        {
+            originalLootSpawnLocations = lootData.spawnLocations;
+            ApplyLootPoolSetting(item);
+        }
+        else
+        {
+            Log.LogWarning("The cloned Arrow Blowgun has no LootData component.");
+        }
+
         RegisterItemName();
 
         RegisterItem(database, item);
@@ -143,7 +206,9 @@ public sealed class Plugin : BaseUnityPlugin
 
         Log.LogInfo(
             $"Registered {item.gameObject.name} from vanilla source {sourceItem.gameObject.name} "
-                + $"with item ID {item.itemID} and {item.totalUses} uses."
+                + $"with item ID {item.itemID}, {item.totalUses} uses, "
+                + $"{item.usingTimePrimary:0.###} second use time, and "
+                + $"{aimCorrectionDegreesConfig.Value:0.###} degree aim correction."
         );
     }
 
@@ -189,6 +254,74 @@ public sealed class Plugin : BaseUnityPlugin
         if (changed)
         {
             Log.LogInfo($"Arrow Blowgun uses set to {uses} from {source}.");
+        }
+    }
+
+    internal void ApplyEffectiveAddToLootPool(bool addToLootPool, string source)
+    {
+        bool changed = effectiveAddToLootPool != addToLootPool;
+        effectiveAddToLootPool = addToLootPool;
+
+        Item? registeredItem = RegisteredItem;
+        if (registeredItem != null)
+        {
+            foreach (Item item in Resources.FindObjectsOfTypeAll<Item>())
+            {
+                if (item != null && item.itemID == registeredItem.itemID)
+                {
+                    ApplyLootPoolSetting(item);
+                }
+            }
+
+            LootData.AllSpawnWeightData = null;
+        }
+
+        if (changed)
+        {
+            Log.LogInfo(
+                $"Arrow Blowgun random loot spawning "
+                    + $"{(addToLootPool ? "enabled" : "disabled")} from {source}."
+            );
+        }
+    }
+
+    private void ApplyLootPoolSetting(Item item)
+    {
+        LootData? lootData = item.GetComponent<LootData>();
+        if (lootData != null)
+        {
+            lootData.spawnLocations = effectiveAddToLootPool
+                ? originalLootSpawnLocations
+                : SpawnPool.None;
+        }
+    }
+
+    private void ValidateFloatConfig(
+        ConfigEntry<float> config,
+        float defaultValue,
+        float minimum,
+        float maximum
+    )
+    {
+        float value = config.Value;
+        if (float.IsNaN(value) || float.IsInfinity(value))
+        {
+            Log.LogWarning(
+                $"Configured {config.Definition.Key} value {value} is invalid; "
+                    + $"using {defaultValue}."
+            );
+            config.Value = defaultValue;
+            return;
+        }
+
+        float clampedValue = Mathf.Clamp(value, minimum, maximum);
+        if (!Mathf.Approximately(value, clampedValue))
+        {
+            Log.LogWarning(
+                $"Configured {config.Definition.Key} value {value} is outside the "
+                    + $"supported range {minimum}-{maximum}; using {clampedValue}."
+            );
+            config.Value = clampedValue;
         }
     }
 
