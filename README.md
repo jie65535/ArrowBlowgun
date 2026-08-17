@@ -16,7 +16,9 @@ All players in a multiplayer lobby must have the mod installed.
 
 - Registers a separate `Arrow Blowgun` item without changing the vanilla blowgun.
 - Registers directly with PEAK's item database and current Photon prefab pool without third-party libraries.
-- Uses the arrow trap's 80-meter raycast range, four-layer shot sound, muzzle puff, and smoke trail.
+- Fires an immediate 80-meter raycast from the actual blowgun muzzle, correcting toward the center-screen aim point by at most 35 degrees.
+- Keeps the muzzle direction when the aim point lies behind it, preventing backward shots around close obstacles.
+- Uses the arrow trap's four-layer shot sound, muzzle puff, and smoke trail.
 - Displays a loaded vanilla arrow at the blowgun muzzle to distinguish it from the dart variant.
 - Embeds arrows in terrain until the current scene is unloaded, matching the vanilla trap behavior.
 - Applies the built-in arrow injury and a small knockback when a character is hit.
