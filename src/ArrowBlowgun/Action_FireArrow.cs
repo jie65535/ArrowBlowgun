@@ -7,6 +7,7 @@ namespace ArrowBlowgun;
 internal sealed class Action_FireArrow : ItemAction
 {
     private const float ArrowShooterRange = 80f;
+    private const float MaxAimCorrectionDegrees = 35f;
     private const float Knockback = 30f;
     private const float KnockbackRadius = 400f;
 
@@ -47,27 +48,45 @@ internal sealed class Action_FireArrow : ItemAction
         }
 
         Vector3 origin = spawnTransform != null ? spawnTransform.position : transform.position;
-        Vector3 direction = MainCamera.instance.transform.forward.normalized;
+        Transform cameraTransform = MainCamera.instance.transform;
+        Vector3 cameraDirection = cameraTransform.forward.normalized;
 
-        RaycastHit hit = Physics
-            .RaycastAll(
-                origin,
-                direction,
-                maxDistance,
-                HelperFunctions.AllPhysical,
-                QueryTriggerInteraction.Ignore
-            )
-            .OrderBy(hit => hit.distance)
-            .FirstOrDefault(hit =>
-            {
-                if (hit.collider == null || hit.collider.GetComponentInParent<Item>() != null)
-                {
-                    return false;
-                }
+        RaycastHit aimHit = FindFirstValidHit(
+            cameraTransform.position,
+            cameraDirection,
+            maxDistance
+        );
+        Vector3 aimPoint = aimHit.collider != null
+            ? aimHit.point
+            : cameraTransform.position + cameraDirection * maxDistance;
+        Vector3 barrelDirection = spawnTransform != null
+            ? spawnTransform.forward.normalized
+            : transform.forward.normalized;
+        if (barrelDirection.sqrMagnitude < Mathf.Epsilon)
+        {
+            barrelDirection = cameraDirection;
+        }
 
-                Character? candidate = hit.collider.GetComponentInParent<Character>();
-                return candidate == null || candidate != character;
-            });
+        Vector3 toAimPoint = aimPoint - origin;
+        Vector3 direction = barrelDirection;
+
+        // Never steer toward a camera hit that lies behind the muzzle plane.
+        if (Vector3.Dot(toAimPoint, barrelDirection) > 0f)
+        {
+            Vector3 desiredDirection = toAimPoint.sqrMagnitude > Mathf.Epsilon
+                ? toAimPoint.normalized
+                : cameraDirection;
+            direction = Vector3
+                .RotateTowards(
+                    barrelDirection,
+                    desiredDirection,
+                    MaxAimCorrectionDegrees * Mathf.Deg2Rad,
+                    0f
+                )
+                .normalized;
+        }
+
+        RaycastHit hit = FindFirstValidHit(origin, direction, maxDistance);
 
         bool hasImpact = hit.collider != null;
         Vector3 endpoint = hasImpact ? hit.point : origin + direction * maxDistance;
@@ -108,6 +127,29 @@ internal sealed class Action_FireArrow : ItemAction
                 Knockback
             );
         }
+    }
+
+    private RaycastHit FindFirstValidHit(Vector3 origin, Vector3 direction, float distance)
+    {
+        return Physics
+            .RaycastAll(
+                origin,
+                direction,
+                distance,
+                HelperFunctions.AllPhysical,
+                QueryTriggerInteraction.Ignore
+            )
+            .OrderBy(hit => hit.distance)
+            .FirstOrDefault(hit =>
+            {
+                if (hit.collider == null || hit.collider.GetComponentInParent<Item>() != null)
+                {
+                    return false;
+                }
+
+                Character? candidate = hit.collider.GetComponentInParent<Character>();
+                return candidate == null || candidate != character;
+            });
     }
 
     [PunRPC]
