@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using Photon.Pun;
 using UnityEngine;
@@ -25,15 +26,38 @@ public sealed class Plugin : BaseUnityPlugin
     private const string PrefabName = "ArrowBlowgun";
     private const string ItemNameKey = "ARROW_BLOWGUN";
     private const string ItemPrefabFolder = "0_Items/";
+    private const int DefaultUses = 3;
+    private const int MinimumUses = 1;
 
     internal static ManualLogSource Log { get; private set; } = null!;
     internal static Item? RegisteredItem { get; private set; }
+    internal int ConfiguredUses => usesConfig.Value;
 
+    private ConfigEntry<int> usesConfig = null!;
+    private int effectiveUses = DefaultUses;
     private GameObject prefabContainer = null!;
 
     private void Awake()
     {
         Log = Logger;
+        usesConfig = Config.Bind(
+            "Balance",
+            "Uses",
+            DefaultUses,
+            "Number of shots before the Arrow Blowgun is consumed. Minimum: 1. "
+                + "In multiplayer, the room creator's value is used for everyone."
+        );
+
+        if (usesConfig.Value < MinimumUses)
+        {
+            Log.LogWarning(
+                $"Configured Uses value {usesConfig.Value} is invalid; using {MinimumUses}."
+            );
+            usesConfig.Value = MinimumUses;
+        }
+
+        effectiveUses = usesConfig.Value;
+        gameObject.AddComponent<RoomUsesSynchronizer>().Initialize(this);
 
         prefabContainer = new GameObject($"{PluginGuid}.Prefabs");
         prefabContainer.SetActive(false);
@@ -56,6 +80,13 @@ public sealed class Plugin : BaseUnityPlugin
         // CharacterAfflictions builds its reusable arrow pool during Awake.
         yield return null;
         ArrowVisualFactory.WarmUp();
+
+        Item? registeredItem = RegisteredItem;
+        if (registeredItem != null)
+        {
+            int attachedCount = ArrowVisualFactory.AttachLoadedArrowVisuals(registeredItem);
+            Log.LogInfo($"Attached loaded arrow visuals to {attachedCount} Arrow Blowgun objects.");
+        }
     }
 
     private IEnumerator RegisterArrowBlowgun()
@@ -100,6 +131,8 @@ public sealed class Plugin : BaseUnityPlugin
 
         item.UIData.itemName = ItemNameKey;
         item.UIData.isShootable = true;
+        item.UIData.hideFuel = effectiveUses <= MinimumUses;
+        item.totalUses = effectiveUses;
         RegisterItemName();
 
         RegisterItem(database, item);
@@ -110,8 +143,53 @@ public sealed class Plugin : BaseUnityPlugin
 
         Log.LogInfo(
             $"Registered {item.gameObject.name} from vanilla source {sourceItem.gameObject.name} "
-                + $"with item ID {item.itemID}."
+                + $"with item ID {item.itemID} and {item.totalUses} uses."
         );
+    }
+
+    internal void ApplyEffectiveUses(int uses, string source)
+    {
+        if (uses < MinimumUses)
+        {
+            Log.LogWarning($"Ignoring invalid synchronized Uses value {uses} from {source}.");
+            return;
+        }
+
+        bool changed = effectiveUses != uses;
+        effectiveUses = uses;
+
+        Item? registeredItem = RegisteredItem;
+        if (registeredItem != null)
+        {
+            foreach (Item item in Resources.FindObjectsOfTypeAll<Item>())
+            {
+                if (item == null || item.itemID != registeredItem.itemID)
+                {
+                    continue;
+                }
+
+                int previousUses = item.totalUses;
+                item.UIData.hideFuel = uses <= MinimumUses;
+                item.totalUses = uses;
+
+                if (item != registeredItem && item.HasData(DataEntryKey.ItemUses))
+                {
+                    OptionableIntItemData remainingUses = item.GetData<OptionableIntItemData>(
+                        DataEntryKey.ItemUses
+                    );
+                    if (remainingUses.HasData && remainingUses.Value == previousUses)
+                    {
+                        remainingUses.Value = uses;
+                        item.SetUseRemainingPercentage(1f);
+                    }
+                }
+            }
+        }
+
+        if (changed)
+        {
+            Log.LogInfo($"Arrow Blowgun uses set to {uses} from {source}.");
+        }
     }
 
     private static void RegisterItem(ItemDatabase database, Item item)

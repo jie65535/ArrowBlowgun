@@ -16,6 +16,8 @@ internal sealed class Action_FireArrow : ItemAction
     [SerializeField]
     private Transform spawnTransform = null!;
 
+    internal Transform SpawnTransform => spawnTransform;
+
     internal void CopyFrom(Action_RaycastDart source)
     {
         maxDistance = source.maxDistance > 0f ? source.maxDistance : ArrowShooterRange;

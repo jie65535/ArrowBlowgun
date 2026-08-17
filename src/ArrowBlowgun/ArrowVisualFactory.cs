@@ -6,6 +6,10 @@ namespace ArrowBlowgun;
 
 internal static class ArrowVisualFactory
 {
+    private const string LoadedArrowName = "ArrowBlowgun.LoadedArrow";
+    private const float LoadedArrowScale = 0.85f;
+    private const float LoadedArrowRetraction = 0.35f;
+
     private enum ArrowAxis
     {
         Forward,
@@ -20,6 +24,41 @@ internal static class ArrowVisualFactory
     internal static void WarmUp()
     {
         EnsureTemplate();
+    }
+
+    internal static int AttachLoadedArrowVisuals(Item registeredItem)
+    {
+        EnsureTemplate();
+
+        int attachedCount = 0;
+        foreach (Item item in Resources.FindObjectsOfTypeAll<Item>())
+        {
+            if (item == null || item.itemID != registeredItem.itemID)
+            {
+                continue;
+            }
+
+            Action_FireArrow? action = item.GetComponent<Action_FireArrow>();
+            Transform? anchor = action?.SpawnTransform;
+            if (anchor == null || anchor.Find(LoadedArrowName) != null)
+            {
+                continue;
+            }
+
+            GameObject loadedArrow = (GameObject)Object.Instantiate(
+                template!,
+                anchor,
+                instantiateInWorldSpace: false
+            );
+            loadedArrow.name = LoadedArrowName;
+            loadedArrow.transform.localPosition = Vector3.back * LoadedArrowRetraction;
+            loadedArrow.transform.localRotation = GetRotation(Vector3.forward);
+            loadedArrow.transform.localScale *= LoadedArrowScale;
+            loadedArrow.SetActive(value: true);
+            attachedCount++;
+        }
+
+        return attachedCount;
     }
 
     internal static GameObject Create(Vector3 position, Vector3 direction)
@@ -43,8 +82,7 @@ internal static class ArrowVisualFactory
             return;
         }
 
-        Vector3 localAxis = templateAxis == ArrowAxis.Forward ? Vector3.forward : Vector3.down;
-        arrow.transform.rotation = Quaternion.FromToRotation(localAxis, direction.normalized);
+        arrow.transform.rotation = GetRotation(direction);
     }
 
     internal static void Embed(
@@ -274,5 +312,11 @@ internal static class ArrowVisualFactory
     private static Vector3 Abs(Vector3 value)
     {
         return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
+    }
+
+    private static Quaternion GetRotation(Vector3 direction)
+    {
+        Vector3 localAxis = templateAxis == ArrowAxis.Forward ? Vector3.forward : Vector3.down;
+        return Quaternion.FromToRotation(localAxis, direction.normalized);
     }
 }
